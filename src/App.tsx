@@ -772,7 +772,8 @@ export default function App() {
                           {plan && (
                             <p>
                               현재 역할과 반대인 인상을 심어 보세요. 기억 때문에
-                              실제 오판 투표가 바뀌면 +75점을 얻습니다.
+                              시민 라이벌의 실제 오판 투표가 바뀌면 +75점을
+                              얻습니다.
                             </p>
                           )}
                         </div>
@@ -927,7 +928,9 @@ export default function App() {
                         <>
                           {d.evidence.tell.label}를{" "}
                           {d.evidence.value ? "선택" : "선택하지 않음"}.<br />
-                          당신의 의심{" "}
+                          {current.roles![d.agentId] === "mafia"
+                            ? "당신을 블러프로 지목할 확률 "
+                            : "당신을 의심해 지목할 확률 "}
                           <b>
                             {pct(d.baseline.you!)} → {pct(d.probabilities.you!)}
                           </b>
@@ -965,7 +968,7 @@ export default function App() {
                     {current.record.deception.success
                       ? "가짜 텔이 통했습니다. +75점"
                       : current.record.deception.matched
-                        ? "반대 역할의 인상은 심었지만, 투표까지 바꾸진 못했습니다."
+                        ? "반대 역할의 인상은 심었지만, 시민 라이벌의 오판 투표로 이어지진 않았습니다."
                         : "이번 계획은 오판 투표로 이어지지 않았습니다."}
                   </strong>
                   <p>
@@ -973,7 +976,7 @@ export default function App() {
                       ? current.record.deception.changedVotes
                           .map((id) => nameOf(id))
                           .join(", ") +
-                        "의 투표가 기억 때문에 틀린 방향으로 바뀌었습니다."
+                        "(시민)의 투표가 기억 때문에 틀린 방향으로 바뀌었습니다."
                       : "결과는 선택 기록에 남습니다. 다음 판에서는 다른 수를 시도해 보세요."}
                   </p>
                 </div>
@@ -1624,7 +1627,7 @@ export default function App() {
                     <b>읽힌 습관을 역이용.</b>
                     <p>
                       발견된 텔로 반대 역할의 인상을 심으세요. 기억 때문에 실제
-                      투표가 틀린 방향으로 바뀌면 +75점.
+                      시민 라이벌의 투표가 틀린 방향으로 바뀌면 +75점.
                     </p>
                   </li>
                 </ol>

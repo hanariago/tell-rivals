@@ -80,7 +80,12 @@ test("memory changes actual votes and can still be wrong", () => {
     chooseReply(m, history, { reply: "switch", target: "rook" });
     for (const d of m.decisions.filter((d) => d.stage === 2)) {
       if (d.target !== d.withoutMemory) flips++;
-      if (d.evidence && d.target === "you" && m.roles.you === "citizen")
+      if (
+        d.evidence &&
+        d.target === "you" &&
+        m.roles.you === "citizen" &&
+        m.roles[d.agentId] === "citizen"
+      )
         incorrect++;
       const values = Object.values(d.probabilities);
       assert.ok(Math.abs(values.reduce((a, b) => a + b, 0) - 1) < 1e-9);
@@ -122,6 +127,7 @@ test("fake tell reward requires precommitted plan, contrary role impression and 
       assert.ok(r.deception.matched);
       assert.ok(r.deception.changedVotes.length);
       for (const id of r.deception.changedVotes) {
+        assert.equal(m.roles[id], "citizen");
         const d = r.decisions.find((d) => d.agentId === id)!;
         assert.equal(d.target, "you");
         assert.notEqual(d.withoutMemory, "you");
@@ -136,6 +142,37 @@ test("fake tell reward requires precommitted plan, contrary role impression and 
   chooseOpening(m, history, { approach: "accuse", target: "nora" }, null);
   chooseReply(m, history, { reply: "switch", target: "rook" });
   assert.equal(finishMatch(m, "rook").deception, null);
+});
+test("a mafia rival's intentional bluff never earns a deception reward", () => {
+  const history = train();
+  let witnessed = false;
+  for (let seed = 0; seed < 500; seed++) {
+    const m = createMatch(history, "practice", seed, true);
+    if (m.roles.you !== "citizen") continue;
+    openRound(m);
+    chooseOpening(
+      m,
+      history,
+      { approach: "accuse", target: "nora" },
+      "firstAccuse",
+    );
+    chooseReply(m, history, { reply: "switch", target: "rook" });
+    const r = finishMatch(m, "rook");
+    const flips = r.decisions.filter(
+      (d) =>
+        d.evidence?.tell.id === "firstAccuse" &&
+        d.target === "you" &&
+        d.withoutMemory !== "you",
+    );
+    if (flips.length && flips.every((d) => m.roles[d.agentId] === "mafia")) {
+      assert.ok(r.deception?.matched);
+      assert.deepEqual(r.deception.changedVotes, []);
+      assert.equal(r.deception.success, false);
+      witnessed = true;
+      break;
+    }
+  }
+  assert.ok(witnessed, "must exercise an actual mafia-only memory vote flip");
 });
 test("no hidden roles or seed reach UI / model; agent only knows its own role", () => {
   const history = train();

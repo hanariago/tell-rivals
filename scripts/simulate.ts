@@ -48,7 +48,12 @@ for (let seed = 0; seed < 1000; seed++) {
   for (const d of record.decisions) {
     if (d.evidence) rememberedVotes++;
     if (d.target !== d.withoutMemory) voteFlips++;
-    if (d.evidence && d.target === "you" && m.roles.you === "citizen")
+    if (
+      d.evidence &&
+      d.target === "you" &&
+      m.roles.you === "citizen" &&
+      m.roles[d.agentId] === "citizen"
+    )
       wrongHumanVotes++;
   }
   if (record.deception?.success) {
@@ -59,9 +64,10 @@ for (let seed = 0; seed < 1000; seed++) {
         role: m.roles.you,
         deception: record.deception,
         decisions: record.decisions
-          .filter((d) => d.agentId === "nora" || d.agentId === "rook")
+          .filter((d) => record.deception!.changedVotes.includes(d.agentId))
           .map((d) => ({
             agent: d.agentId,
+            role: m.roles[d.agentId],
             target: d.target,
             withoutMemory: d.withoutMemory,
             text: d.text,
@@ -70,16 +76,25 @@ for (let seed = 0; seed < 1000; seed++) {
   }
   if (
     !firstCitation &&
-    record.decisions.some((d) => d.evidence && d.target === "you")
+    record.decisions.some(
+      (d) =>
+        d.evidence && d.target === "you" && m.roles[d.agentId] === "citizen",
+    )
   )
     firstCitation = {
       round: m.round,
       seed,
       role: m.roles.you,
       decisions: record.decisions
-        .filter((d) => d.evidence && d.target === "you")
+        .filter(
+          (d) =>
+            d.evidence &&
+            d.target === "you" &&
+            m.roles[d.agentId] === "citizen",
+        )
         .map((d) => ({
           agent: d.agentId,
+          role: m.roles[d.agentId],
           text: d.text,
           sourceRounds: d.evidence!.cites,
           withMemory: d.probabilities.you,

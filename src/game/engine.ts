@@ -522,6 +522,7 @@ export function finishMatch(match: Match, target: AgentId): RecordEntry {
     const changedVotes = relevant
       .filter(
         (d) =>
+          match.roles[d.agentId] === "citizen" &&
           d.target !== d.withoutMemory &&
           ((match.roles.you === "mafia" &&
             d.target !== "you" &&

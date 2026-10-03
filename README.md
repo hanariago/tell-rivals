@@ -13,7 +13,9 @@ npm run build
 npm start
 ```
 
-브라우저에서 **http://127.0.0.1:4317** 을 엽니다. `localhost`를 사용하지 마세요. Windows에서는 `start.ps1`로 설치·빌드·실행을 한 번에 할 수 있습니다. 개발 서버는 `npm run dev`입니다.
+브라우저에서 **http://127.0.0.1:4317** 을 엽니다. `localhost`를 사용하지 마세요. Windows에서는 **`play.cmd`를 더블클릭**하면 설치·빌드 후 서버가 백그라운드로 실행됩니다. PC를 재시작한 뒤에는 다시 실행하세요. 시작 로그는 `%LOCALAPPDATA%\TellRivals\runtime.stdout.log`, 오류는 `runtime.stderr.log`에 남습니다. 자동 시작 서비스는 설치하지 않습니다.
+
+`start.ps1`은 터미널을 유지하는 실행 방식이며 Ctrl+C로 종료합니다. `start.ps1 -Background`는 백그라운드 실행, `-NoBuild`는 이미 빌드한 결과를 사용합니다. 개발 서버는 `npm run dev`입니다.
 
 ```powershell
 # 포트 변경은 선택 사항입니다. 로그인 콜백도 같은 포트로 자동 구성됩니다.

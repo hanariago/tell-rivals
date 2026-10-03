@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import Lobby from "./ui/Lobby.js";
+import PlayBoard from "./ui/PlayBoard.js";
 import {
   ArrowUpRight,
   ArrowRight,
@@ -7,26 +9,21 @@ import {
   BookOpen,
   SlidersHorizontal,
   ShieldCheck,
-  ChevronRight,
   Clock3,
   Zap,
   X,
   Eye,
-  Crosshair,
   Check,
   Download,
   RotateCcw,
-  Target,
   Sparkles,
-  Users,
   BarChart3,
   LogOut,
   AlertTriangle,
-  MoveUpRight,
+  HelpCircle,
 } from "lucide-react";
 import {
   AGENTS,
-  FEATURE_LABELS,
   nameOf,
   roleName,
   type Mode,
@@ -117,8 +114,17 @@ export default function App() {
   const [error, setError] = useState("");
   const [modal, setModal] = useState<"rules" | "delete" | null>(null);
   const [hideResult, setHideResult] = useState(false);
+  const [notebookRound, setNotebookRound] = useState<number | null>(null);
   const modelAttempt = useRef<string | null>(null);
   const csrf = useRef("");
+  const stageHeading = useRef<HTMLHeadingElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const activeProfile = state?.auth.profiles.find(
+    (p) => p.id === state.auth.activeId,
+  );
+  const welcome = activeProfile?.needsWelcome;
+  const dialogOpen =
+    Boolean(modal || welcome || state?.match?.aiError) && !busy;
   async function api(url: string, body?: unknown) {
     const r = await fetch(url, {
       method: body === undefined ? "GET" : "POST",
@@ -127,6 +133,10 @@ export default function App() {
           ? {}
           : { "Content-Type": "application/json", "X-Tell-CSRF": csrf.current },
       body: body === undefined ? undefined : JSON.stringify(body),
+    }).catch(() => {
+      throw new Error(
+        "게임 서버에 연결할 수 없습니다. 폴더의 play.cmd를 실행한 뒤 다시 시도해 주세요.",
+      );
     });
     const data = await r.json();
     if (!r.ok)
@@ -184,6 +194,61 @@ export default function App() {
     )
       setMode(state.match.mode);
   }, [state?.match?.mode]);
+  useEffect(() => {
+    setTarget(null);
+    setReply("hold");
+    if (state?.match) {
+      window.scrollTo({ top: 0, behavior: "instant" });
+      stageHeading.current?.focus({ preventScroll: true });
+    }
+  }, [state?.match?.id, state?.match?.stage]);
+  useEffect(() => {
+    if (page === "memory" && notebookRound !== null) {
+      const row = document.getElementById(`record-${notebookRound}`);
+      row?.scrollIntoView({ block: "center", behavior: "instant" });
+      row?.focus({ preventScroll: true });
+    } else window.scrollTo({ top: 0, behavior: "instant" });
+  }, [page, notebookRound, hideResult]);
+  function openNotebook(round?: number) {
+    setNotebookRound(round ?? null);
+    setPage("memory");
+  }
+  useEffect(() => {
+    if (!dialogOpen || !dialogRef.current) return;
+    const previous = document.activeElement;
+    const dialog = dialogRef.current;
+    const controls = () => [
+      ...dialog.querySelectorAll<HTMLElement>(
+        "button:not(:disabled), a[href], select:not(:disabled), summary",
+      ),
+    ];
+    (
+      dialog.querySelector<HTMLElement>("[data-autofocus]") || controls()[0]
+    )?.focus();
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && modal) {
+        event.preventDefault();
+        setModal(null);
+      }
+      if (event.key === "Tab") {
+        const items = controls();
+        const first = items[0],
+          last = items.at(-1);
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last?.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first?.focus();
+        }
+      }
+    };
+    dialog.addEventListener("keydown", onKey);
+    return () => {
+      dialog.removeEventListener("keydown", onKey);
+      if (previous instanceof HTMLElement) previous.focus();
+    };
+  }, [dialogOpen, modal]);
   async function loadModels() {
     await run(async () => {
       const data = await api("/api/models", {});
@@ -197,7 +262,8 @@ export default function App() {
       location.assign(data.url);
     }, "ChatGPT 로그인으로 이동 중");
   }
-  async function start() {
+  async function start(nextMode: Mode = mode) {
+    if (nextMode !== mode) setMode(nextMode);
     setTarget(null);
     setPlan(null);
     setApproach("observe");
@@ -205,7 +271,11 @@ export default function App() {
     setHideResult(false);
     await run(async () => {
       setState(
-        await api("/api/game/start", { mode, model, memoryEnabled: memory }),
+        await api("/api/game/start", {
+          mode: nextMode,
+          model,
+          memoryEnabled: memory,
+        }),
       );
     }, "테이블을 준비하는 중");
   }
@@ -234,38 +304,43 @@ export default function App() {
         <img src="/assets/mark.svg" alt="" />
         <p>TELL 테이블을 준비하고 있습니다.</p>
         {error && <p className="error-text">{error}</p>}
+        {error && (
+          <button
+            className="primary-button"
+            onClick={() => refresh().catch((e) => setError(e.message))}
+          >
+            다시 연결하기
+          </button>
+        )}
       </div>
     );
   const current = state.match;
   const playing = current && current.stage !== "finished";
   const result = current?.stage === "finished" && !hideResult;
-  const activeProfile = state.auth.profiles.find(
-    (p) => p.id === state.auth.activeId,
-  );
-  const welcome = activeProfile?.needsWelcome;
+  const latestRecord = state.history.at(-1);
   const navigation: { id: Page; label: string; icon: typeof CircleDot }[] = [
-    { id: "play", label: "플레이", icon: CircleDot },
-    { id: "memory", label: "라이벌의 노트", icon: BookOpen },
+    { id: "play", label: "게임", icon: CircleDot },
+    { id: "memory", label: "습관 노트", icon: BookOpen },
     { id: "usage", label: "플레이 기록", icon: BarChart3 },
     { id: "settings", label: "설정", icon: SlidersHorizontal },
   ];
   return (
     <div className="app-shell">
-      <aside className="sidebar">
+      <aside className="sidebar" inert={busy || dialogOpen}>
         <a className="brand" href="/" aria-label="TELL 홈">
           <img src="/assets/mark.svg" alt="" />
           <span>
             TELL<span className="brand-dot">.</span>
-            <small>THEY REMEMBER YOU</small>
+            <small>나를 읽는 라이벌</small>
           </span>
         </a>
-        <div className="nav-label">YOUR NEXT MOVE</div>
         <nav>
           {navigation.map((n) => (
             <button
               key={n.id}
               className={"nav-item " + (page === n.id ? "active" : "")}
               aria-label={n.label}
+              aria-current={page === n.id ? "page" : undefined}
               onClick={() => setPage(n.id)}
             >
               <n.icon size={18} />
@@ -276,43 +351,26 @@ export default function App() {
             </button>
           ))}
         </nav>
-        <div className="sidebar-note">
-          <div className="note-symbol">
-            <Fingerprint size={25} />
-          </div>
-          <strong>라이벌은 기억합니다.</strong>
-          <p>
-            당신의 다음 수는
-            <br />
-            지난 수와 같을까요?
-          </p>
-          <div className="mini-stats">
-            <span>
-              <b>{String(state.stats.rounds).padStart(2, "0")}</b>플레이한 판
-            </span>
-            <span>
-              <b>{String(state.tells.length).padStart(2, "0")}</b>발견된 텔
-            </span>
-          </div>
-        </div>
         <div className="sidebar-bottom">
           <div className="local-status">
             <span className="status-dot" />
             기억은 이 기기에
           </div>
           <button className="help-link" onClick={() => setModal("rules")}>
-            게임 방법 <ArrowUpRight size={14} />
+            <HelpCircle size={17} /> 게임 방법
           </button>
-          <small>
-            LOCAL EDITION <span>v0.1</span>
-          </small>
         </div>
       </aside>
-      <main className="workspace">
+      <main className="workspace" inert={busy || dialogOpen}>
         <header className="topbar">
           <div className="breadcrumb">
-            TELL <ChevronRight size={12} />
-            <span>{navigation.find((n) => n.id === page)!.label}</span>
+            {page !== "play" && playing ? (
+              <button className="text-button" onClick={() => setPage("play")}>
+                <ArrowRight size={15} /> 진행 중인 게임으로 돌아가기
+              </button>
+            ) : (
+              <span>{navigation.find((n) => n.id === page)!.label}</span>
+            )}
           </div>
           <div className="topbar-right">
             <span className="mode-chip">
@@ -320,8 +378,8 @@ export default function App() {
               {state.testMode
                 ? "QA 테스트 저장소"
                 : mode === "practice"
-                  ? "연습 · 로컬 규칙 AI"
-                  : "ChatGPT 모드"}
+                  ? "로그인 없는 연습"
+                  : "ChatGPT로 플레이"}
             </span>
             <button
               className="icon-button"
@@ -331,7 +389,6 @@ export default function App() {
             >
               <SlidersHorizontal size={17} />
             </button>
-            <div className="user-mark">Y</div>
           </div>
         </header>
         {error && (
@@ -344,516 +401,44 @@ export default function App() {
           </div>
         )}
         {page === "play" && !playing && !result && (
-          <div className="lobby">
-            <div className="hero-copy">
-              <div className="eyebrow">
-                <span /> A GAME OF SECOND GUESSES
-              </div>
-              <h1>
-                당신의 습관이,
-                <br />
-                다음 판의 <em>단서</em>가 된다.
-              </h1>
-              <p>
-                네 명의 AI 라이벌. 다섯 개의 의심.
-                <br />
-                그들은 당신을 읽고, 당신은 읽힌 자신을 속입니다.
-              </p>
-              <div className="hero-meta">
-                <span>
-                  <Users size={15} /> 5인 테이블
-                </span>
-                <i />
-                <span>
-                  <Clock3 size={15} /> 목표 1–3분 / 판
-                </span>
-                <i />
-                <span>
-                  <Crosshair size={15} /> 클릭으로만 플레이
-                </span>
-              </div>
-            </div>
-            <div className="table-section">
-              <div className="section-label">
-                <span>
-                  <span className="pulse-dot" />
-                  오늘의 테이블
-                </span>
-                <small>FOUR MINDS. ONE SECRET.</small>
-              </div>
-              <div className="rivals-row">
-                {AGENTS.map((a, i) => (
-                  <div
-                    key={a.id}
-                    className="rival-lobby"
-                    style={{ "--accent": a.color } as React.CSSProperties}
-                  >
-                    <div className="rival-art">
-                      <span className="seat-number">0{i + 1}</span>
-                      <Portrait id={a.id} />
-                      <span className="rival-tag">{a.tag}</span>
-                    </div>
-                    <div className="rival-description">
-                      <h3>
-                        {a.name}
-                        <span>
-                          <span className="status-dot" />
-                          준비
-                        </span>
-                      </h3>
-                      <p>{a.focus}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="lobby-bottom">
-              <div className="join-card">
-                <div>
-                  <div className="eyebrow small-label">
-                    YOUR SEAT IS WAITING
-                  </div>
-                  <h2>
-                    {playing ? "진행 중인 테이블" : "이번에는 어떤 당신일까요?"}
-                  </h2>
-                  <p>
-                    {state.stats.rounds === 0
-                      ? "첫 판은 탐색. 판이 쌓이면, 습관이 읽히기 시작합니다."
-                      : state.tells.length
-                        ? "라이벌이 " +
-                          state.tells.length +
-                          "개의 습관을 기억합니다. 다음 수를 바꿔 보세요."
-                        : "시민·마피아 각각 두 판부터 역할에 따른 차이를 찾습니다."}
-                  </p>
-                </div>
-                <div className="join-actions">
-                  {mode === "chatgpt" && !state.auth.sharing ? (
-                    <ChatGPTButton onClick={() => signIn(activeProfile?.id)} />
-                  ) : (
-                    <button
-                      className="primary-button"
-                      onClick={start}
-                      disabled={
-                        mode === "chatgpt" && (!model || state.planPaused)
-                      }
-                    >
-                      테이블에 앉기 <ArrowRight size={18} />
-                    </button>
-                  )}
-                  <button
-                    className="text-button"
-                    onClick={() =>
-                      setMode(mode === "practice" ? "chatgpt" : "practice")
-                    }
-                  >
-                    {mode === "practice"
-                      ? "내 ChatGPT 플랜으로 플레이"
-                      : "로그인 없이 연습하기"}{" "}
-                    <ArrowUpRight size={13} />
-                  </button>
-                </div>
-              </div>
-              <div className="promise-card">
-                <Fingerprint size={28} />
-                <h3>말투보다, 선택.</h3>
-                <p>
-                  역할에 따라 달라지는 행동만
-                  <br />
-                  라이벌의 단서가 됩니다.
-                </p>
-                <button onClick={() => setPage("memory")}>
-                  내 텔 살펴보기 <MoveUpRight size={13} />
-                </button>
-              </div>
-            </div>
-            <div className="lobby-footer">
-              <ShieldCheck size={14} />
-              <span>연습과 ChatGPT 기록은 각각 저장됩니다.</span>
-              <span className="right">기억을 끄고 비교할 수도 있습니다.</span>
-            </div>
-          </div>
+          <Lobby
+            rounds={state.stats.rounds}
+            tells={state.tells.length}
+            sharing={state.auth.sharing}
+            ready={Boolean(model)}
+            paused={state.planPaused}
+            onPractice={() => start("practice")}
+            onChatGPT={() => start("chatgpt")}
+            onSignIn={() => signIn(activeProfile?.id)}
+            onRules={() => setModal("rules")}
+            onNotebook={() => openNotebook()}
+          />
         )}
         {page === "play" && playing && (
-          <div className="game-screen">
-            <div className="game-heading">
-              <div>
-                <div className="eyebrow">
-                  ROUND {String(current.round).padStart(2, "0")} · THE READING
-                  ROOM
-                </div>
-                <h2>
-                  한 명의 마피아.
-                  <br className="mobile-only" /> 이번엔 누구일까요?
-                </h2>
-              </div>
-              <div className={"role-pill " + current.role}>
-                <span>{current.role === "mafia" ? "◆" : "◇"}</span> 당신은{" "}
-                {roleName(current.role)}
-                <small>
-                  {current.role === "mafia"
-                    ? "들키지 않고 살아남으세요"
-                    : "마피아를 찾아내세요"}
-                </small>
-              </div>
-            </div>
-            <div className="round-steps">
-              {["역할 확인", "첫 선택", "응수", "최종 투표"].map((s, i) => (
-                <div
-                  key={s}
-                  className={
-                    ["brief", "opening", "reply", "vote"].indexOf(
-                      current.stage,
-                    ) >= i
-                      ? "reached"
-                      : ""
-                  }
-                >
-                  <span>{i + 1}</span>
-                  {s}
-                </div>
-              ))}
-              <small>기억 {current.memoryEnabled ? "ON" : "OFF"}</small>
-            </div>
-            <div className="game-layout">
-              <div className="game-table">
-                <div className="players-grid">
-                  {AGENTS.map((a) => (
-                    <button
-                      key={a.id}
-                      className={
-                        "player-card " + (target === a.id ? "selected" : "")
-                      }
-                      onClick={() => setTarget(a.id)}
-                      disabled={current.stage === "brief"}
-                      style={{ "--accent": a.color } as React.CSSProperties}
-                    >
-                      <div className="player-art">
-                        <Portrait id={a.id} />
-                        {target === a.id && (
-                          <span className="selected-mark">
-                            <Check size={14} />
-                          </span>
-                        )}
-                      </div>
-                      <strong>
-                        {a.name}
-                        <small>{a.tag}</small>
-                      </strong>
-                      <div
-                        className={
-                          "clue " +
-                          (current.clues[a.id] > 0.6 ? "uncertain" : "")
-                        }
-                      >
-                        {current.clues[a.id] > 0.6
-                          ? "엇갈린 알리바이"
-                          : current.clues[a.id] > 0.3
-                            ? "미확인 알리바이"
-                            : "부분 확인된 알리바이"}
-                      </div>
-                    </button>
-                  ))}
-                </div>
-                <div className="your-alibi">
-                  <Eye size={15} /> 당신의 공개 단서{" "}
-                  <b>
-                    {current.clues.you > 0.6
-                      ? "엇갈린 알리바이"
-                      : current.clues.you > 0.3
-                        ? "미확인 알리바이"
-                        : "부분 확인된 알리바이"}
-                  </b>
-                  <small>
-                    알리바이는 불완전하며, 역할을 확정하지 않습니다.
-                  </small>
-                </div>
-                <div className="conversation">
-                  <div className="section-label">
-                    <span>테이블의 목소리</span>
-                    <small>공개 발언</small>
-                  </div>
-                  {current.decisions.length === 0 ? (
-                    <div className="conversation-empty">
-                      <CircleDot size={25} />
-                      <p>당신의 첫 수를 기다립니다.</p>
-                      <small>
-                        먼저 지목할지, 지켜볼지. 작은 선택도 단서가 됩니다.
-                      </small>
-                    </div>
-                  ) : (
-                    current.decisions
-                      .filter(
-                        (d) => d.stage === (current.stage === "reply" ? 1 : 2),
-                      )
-                      .map((d) => (
-                        <div className="speech" key={d.agentId + "-" + d.stage}>
-                          <Portrait id={d.agentId} small />
-                          <div>
-                            <div className="speech-name">
-                              {nameOf(d.agentId)}
-                              {d.evidence && (
-                                <span>
-                                  <BookOpen size={11} /> 기억을 꺼냄
-                                </span>
-                              )}
-                            </div>
-                            <p>{d.text}</p>
-                            {d.evidence && (
-                              <div className="evidence-cites">
-                                실제 기록{" "}
-                                {d.evidence.cites.slice(-8).map((r) => (
-                                  <button
-                                    key={r}
-                                    onClick={() => setPage("memory")}
-                                  >
-                                    #{r}
-                                  </button>
-                                ))}
-                                <small>
-                                  당신의 의심 {d.evidence.delta > 0 ? "+" : ""}
-                                  {pct(d.evidence.delta)}
-                                </small>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      ))
-                  )}
-                </div>
-              </div>
-              <aside className="action-panel">
-                <div className="eyebrow">YOUR MOVE</div>
-                {current.stage === "brief" ? (
-                  <>
-                    <h3>
-                      당신의 역할을
-                      <br />
-                      확인해 주세요.
-                    </h3>
-                    <div className={"secret-card " + current.role}>
-                      <span>{current.role === "mafia" ? "◆" : "◇"}</span>
-                      <h2>{roleName(current.role)}</h2>
-                      <p>
-                        {current.role === "mafia"
-                          ? "표를 다른 사람에게 돌리세요. 동률이면 마피아가 탈출합니다."
-                          : "최종 투표에서 마피아가 단독 최다표를 받으면 승리합니다."}
-                      </p>
-                    </div>
-                    <p className="panel-hint">
-                      두 번의 토론, 한 번의 투표.
-                      <br />
-                      역할은 마지막에 모두 공개됩니다.
-                    </p>
-                    <button
-                      className="primary-button full"
-                      onClick={() => action("reveal")}
-                    >
-                      역할 확인, 시작 <ArrowRight size={16} />
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <h3>
-                      {current.stage === "opening"
-                        ? "첫 수를 골라 주세요."
-                        : current.stage === "reply"
-                          ? "읽힌 나를 바꿀 시간."
-                          : "마지막 한 표입니다."}
-                    </h3>
-                    <p className="panel-hint">
-                      {current.stage === "opening"
-                        ? "테이블에서 한 명을 고르고, 행동을 선택하세요."
-                        : current.stage === "reply"
-                          ? "라이벌의 지목을 보고 입장을 정하세요."
-                          : "토론에서 지목한 사람과 달라도 괜찮습니다."}
-                    </p>
-                    {current.stage === "opening" && (
-                      <div className="choice-list">
-                        {(
-                          [
-                            {
-                              id: "accuse",
-                              label: "먼저 지목한다",
-                              sub: "내가 의심하는 사람을 공개",
-                              icon: Crosshair,
-                            },
-                            {
-                              id: "observe",
-                              label: "한발 물러서 관망한다",
-                              sub: "내 의심은 아직 보류",
-                              icon: Eye,
-                            },
-                            {
-                              id: "defend",
-                              label: "내 결백부터 주장한다",
-                              sub: "내 역할은 시민이라고 주장",
-                              icon: ShieldCheck,
-                            },
-                          ] as const
-                        ).map((c) => (
-                          <button
-                            key={c.id}
-                            className={approach === c.id ? "chosen" : ""}
-                            onClick={() => setApproach(c.id)}
-                          >
-                            <c.icon size={17} />
-                            <span>
-                              {c.label}
-                              <small>{c.sub}</small>
-                            </span>
-                            <span className="radio-dot" />
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                    {current.stage === "reply" && (
-                      <div className="choice-list">
-                        {(
-                          [
-                            {
-                              id: "hold",
-                              label: "첫 지목을 유지한다",
-                              sub:
-                                nameOf(current.opening!.target) + "에게 그대로",
-                              icon: Target,
-                            },
-                            {
-                              id: "switch",
-                              label: "다른 사람으로 바꾼다",
-                              sub: "테이블에서 새 대상을 선택",
-                              icon: RotateCcw,
-                            },
-                            {
-                              id: "follow",
-                              label: "다수의 지목을 따른다",
-                              sub: nameOf(current.majorityTarget) + "에게 합류",
-                              icon: Users,
-                            },
-                          ] as const
-                        ).map((c) => (
-                          <button
-                            key={c.id}
-                            className={reply === c.id ? "chosen" : ""}
-                            onClick={() => setReply(c.id)}
-                          >
-                            <c.icon size={17} />
-                            <span>
-                              {c.label}
-                              <small>{c.sub}</small>
-                            </span>
-                            <span className="radio-dot" />
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                    {current.stage === "opening" &&
-                      current.memoryEnabled &&
-                      state.tells.length > 0 && (
-                        <div className="deception-plan">
-                          <span>
-                            <Sparkles size={13} /> 텔 역이용 계획{" "}
-                            <small>선택 사항</small>
-                          </span>
-                          <button
-                            className={!plan ? "plan-active" : ""}
-                            onClick={() => setPlan(null)}
-                          >
-                            이번엔 자연스럽게
-                          </button>
-                          {state.tells.map((t) => (
-                            <button
-                              className={plan === t.id ? "plan-active" : ""}
-                              key={t.id}
-                              onClick={() => setPlan(t.id)}
-                            >
-                              {t.label}로 속이기
-                            </button>
-                          ))}
-                          {plan && (
-                            <p>
-                              현재 역할과 반대인 인상을 심어 보세요. 기억 때문에
-                              시민 라이벌의 실제 오판 투표가 바뀌면 +75점을
-                              얻습니다.
-                            </p>
-                          )}
-                        </div>
-                      )}
-                    <div className="target-summary">
-                      <span>
-                        {current.stage === "vote"
-                          ? "최종 투표 대상"
-                          : "선택한 대상"}
-                      </span>
-                      <strong>
-                        {current.stage === "reply" && reply !== "switch"
-                          ? nameOf(
-                              reply === "hold"
-                                ? current.opening!.target
-                                : current.majorityTarget,
-                            )
-                          : target
-                            ? nameOf(target)
-                            : "테이블에서 선택"}
-                      </strong>
-                    </div>
-                    <button
-                      className="primary-button full"
-                      disabled={
-                        current.stage === "reply"
-                          ? reply === "switch" &&
-                            (!target || target === current.opening!.target)
-                          : !target
-                      }
-                      onClick={() =>
-                        action(
-                          current.stage === "opening"
-                            ? "opening"
-                            : current.stage === "reply"
-                              ? "reply"
-                              : "vote",
-                          current.stage === "opening"
-                            ? { approach, target, plan }
-                            : current.stage === "reply"
-                              ? {
-                                  reply,
-                                  target: target || current.opening!.target,
-                                }
-                              : { target },
-                        )
-                      }
-                    >
-                      {current.stage === "vote"
-                        ? "이 사람에게 투표"
-                        : "선택 확정"}{" "}
-                      <ArrowRight size={16} />
-                    </button>
-                  </>
-                )}
-                <div className="provider-note">
-                  {mode === "chatgpt" && !current.localFallback ? (
-                    <>
-                      <Zap size={12} />
-                      <span>Using ChatGPT plan</span>
-                      <a href={usageUrl} target="_blank" rel="noreferrer">
-                        Manage usage
-                      </a>
-                    </>
-                  ) : (
-                    <>
-                      <CircleDot size={12} />
-                      <span>로컬 규칙 AI · 토큰 사용 없음</span>
-                    </>
-                  )}
-                </div>
-              </aside>
-            </div>
-          </div>
+          <PlayBoard
+            current={current}
+            mode={mode}
+            target={target}
+            approach={approach}
+            reply={reply}
+            plan={plan}
+            tells={state.tells}
+            headingRef={stageHeading}
+            onTarget={setTarget}
+            onApproach={setApproach}
+            onReply={(value) => {
+              setReply(value);
+              if (value === "switch") setTarget(null);
+            }}
+            onPlan={setPlan}
+            onAction={action}
+            onNotebook={openNotebook}
+            onRules={() => setModal("rules")}
+          />
         )}
         {page === "play" && result && (
           <div className="results-screen">
-            <div className="eyebrow">
-              ROUND {current.round} · AFTER THE REVEAL
-            </div>
+            <div className="eyebrow">{current.round}번째 판 · 역할 공개</div>
             <div className="result-title">
               <div
                 className={"result-emblem " + (current.won ? "win" : "lose")}
@@ -861,18 +446,20 @@ export default function App() {
                 {current.won ? <Check size={35} /> : <Eye size={35} />}
               </div>
               <div>
-                <h1>
+                <h1 ref={stageHeading} tabIndex={-1}>
                   {current.won
-                    ? "이번 수는 당신의 승리."
-                    : "이번엔 라이벌의 승리."}
+                    ? "이겼어요! 다음 수는 뭘까요?"
+                    : "이번 판은 졌어요. 다음엔 다르게."}
                 </h1>
                 <p>
                   {current.eliminated
                     ? nameOf(current.eliminated) +
-                      "에게 최다표. " +
+                      "의 역할은 " +
                       roleName(current.roles![current.eliminated]) +
-                      "였습니다."
-                    : "동률로 마피아가 탈출했습니다."}{" "}
+                      (current.roles![current.eliminated] === "mafia"
+                        ? "였어요. 가장 많은 표를 받아 추방됐습니다."
+                        : "이었어요. 시민을 추방해 마피아가 살아남았습니다.")
+                    : "표가 동률이라 마피아가 살아남았어요."}{" "}
                   <span>당신은 {roleName(current.role)}</span>
                 </p>
               </div>
@@ -880,7 +467,7 @@ export default function App() {
                 +
                 {(current.won ? 100 : 25) +
                   (current.record?.deception?.success ? 75 : 0)}
-                <small>POINTS</small>
+                <small>획득한 점수</small>
               </b>
             </div>
             <div className="reveal-row">
@@ -902,6 +489,10 @@ export default function App() {
                 </span>
                 <small>기억은 확률일 뿐, 정답이 아닙니다.</small>
               </div>
+              <p className="result-intro">
+                과거의 습관을 몰랐을 때의 투표와 이번 실제 투표를 비교해요.
+                기록이 더 쌓이면 이 차이가 나타납니다.
+              </p>
               <div className="readings-grid">
                 {current.record!.decisions.map((d) => (
                   <div className="reading-card" key={d.agentId}>
@@ -927,28 +518,30 @@ export default function App() {
                       {d.evidence ? (
                         <>
                           {d.evidence.tell.label}를{" "}
-                          {d.evidence.value ? "선택" : "선택하지 않음"}.<br />
+                          {d.evidence.value
+                            ? "선택했어요"
+                            : "선택하지 않았어요"}
+                          .<br />
                           {current.roles![d.agentId] === "mafia"
-                            ? "당신을 블러프로 지목할 확률 "
-                            : "당신을 의심해 지목할 확률 "}
+                            ? "마피아가 내게 표를 돌릴 확률 "
+                            : "나를 의심해 지목할 확률 "}
                           <b>
                             {pct(d.baseline.you!)} → {pct(d.probabilities.you!)}
                           </b>
                         </>
                       ) : current.memoryEnabled ? (
-                        "이번 선택에 적용할 역할별 텔은 없습니다."
+                        "이번에는 과거의 습관이 판단에 쓰이지 않았어요. 공개 단서와 이번 선택으로 판단했습니다."
                       ) : (
                         "이 판에서는 텔 기억을 사용하지 않았습니다."
                       )}
                     </p>
                     <div className="vote-comparison">
                       <span>
-                        기억 OFF <b>{nameOf(d.withoutMemory)}</b>
+                        과거 기억이 없었다면 <b>{nameOf(d.withoutMemory)}</b>
                       </span>
                       <ArrowRight size={13} />
                       <span>
-                        {current.memoryEnabled ? "기억 ON" : "실제 투표 (OFF)"}{" "}
-                        <b>{nameOf(d.target)}</b>
+                        이번 실제 투표 <b>{nameOf(d.target)}</b>
                       </span>
                     </div>
                   </div>
@@ -968,7 +561,7 @@ export default function App() {
                     {current.record.deception.success
                       ? "가짜 텔이 통했습니다. +75점"
                       : current.record.deception.matched
-                        ? "반대 역할의 인상은 심었지만, 시민 라이벌의 오판 투표로 이어지진 않았습니다."
+                        ? "다른 역할처럼 보였지만, 시민 라이벌의 투표까지 속이지는 못했어요."
                         : "이번 계획은 오판 투표로 이어지지 않았습니다."}
                   </strong>
                   <p>
@@ -989,50 +582,52 @@ export default function App() {
                   {state.tells.length
                     ? state.tells.length +
                       "개의 역할별 텔이 라이벌의 노트에 있습니다."
-                    : "라이벌이 당신의 선택을 한 판 더 배웠습니다."}
+                    : "라이벌이 이번 선택도 기억했어요. 아직 습관을 비교하는 중입니다."}
                 </strong>
                 <p>
                   시민 {state.stats.roleSamples.citizen}판 · 마피아{" "}
                   {state.stats.roleSamples.mafia}판.{" "}
                   {state.tells.length
                     ? "역할을 바꿔 같은 행동을 하면, 그들의 추측도 흔들립니다."
-                    : "각 역할 두 판부터 차이가 충분한 행동만 텔로 인정합니다."}
+                    : "시민과 마피아를 각각 두 판 이상 경험한 뒤, 역할에 따라 달라진 선택을 찾아요."}
                 </p>
               </div>
               <button className="text-button" onClick={() => setPage("memory")}>
-                기록 보기 <ArrowUpRight size={14} />
+                습관 노트 보기 <ArrowUpRight size={14} />
               </button>
             </div>
             <div className="result-footer">
               <span>
                 <Clock3 size={14} />
                 {ms(current.record!.elapsedMs)}
-                <i /> API {current.metrics.length}회<i />
+                <i /> AI 호출 {current.metrics.length}회<i />
                 {current.metrics.some((m) => m.totalTokens !== null)
                   ? current.metrics.reduce(
                       (s, m) => s + (m.totalTokens || 0),
                       0,
-                    ) + " tokens"
+                    ) + " 토큰"
                   : "토큰 " + (mode === "practice" ? "사용 없음" : "미집계")}
               </span>
               <button
                 className="secondary-button"
                 onClick={() => setHideResult(true)}
               >
-                테이블로 돌아가기
+                첫 화면으로
               </button>
-              <button className="primary-button" onClick={start}>
-                다음 판, 다르게 두기 <ArrowRight size={16} />
+              <button className="primary-button" onClick={() => start()}>
+                한 판 더 시작 <ArrowRight size={16} />
               </button>
             </div>
           </div>
         )}
         {page === "memory" && (
           <div className="content-page">
-            <div className="eyebrow">THE RIVALS' NOTEBOOK</div>
-            <h1>그들이 읽은 당신.</h1>
+            <div className="eyebrow">라이벌의 습관 노트</div>
+            <h1>어떤 선택을 기억하고 있을까요?</h1>
             <p className="page-intro">
-              성격은 라이벌의 방식. 텔은 역할에 따라 달라진 당신의 선택입니다.
+              ‘텔’은 시민일 때와 마피아일 때 다르게 반복한 선택이에요. 예를 들어
+              마피아일 때만 먼저 지목했다면, 그 행동이 다음 판의 의심 근거가
+              됩니다.
             </p>
             <div className="memory-progress">
               <Fingerprint size={29} />
@@ -1043,8 +638,9 @@ export default function App() {
                     : "아직 당신을 읽는 중입니다."}
                 </strong>
                 <p>
-                  시민 {state.stats.roleSamples.citizen}/2판 이상 · 마피아{" "}
-                  {state.stats.roleSamples.mafia}/2판 이상에서 비교합니다.
+                  지금까지 시민 {state.stats.roleSamples.citizen}판 · 마피아{" "}
+                  {state.stats.roleSamples.mafia}판. 각 역할 두 판 이상부터
+                  습관을 비교해요.
                 </p>
               </div>
               <span>{state.stats.rounds}판의 기록</span>
@@ -1052,18 +648,23 @@ export default function App() {
             {state.tells.length === 0 ? (
               <div className="empty-notebook">
                 <BookOpen size={40} />
-                <h3>습관을 성급히 단정하지 않습니다.</h3>
+                <h3>
+                  {state.stats.roleSamples.citizen >= 2 &&
+                  state.stats.roleSamples.mafia >= 2
+                    ? "두 역할의 선택이 아직 충분히 다르지 않아요."
+                    : "아직 비교할 기록이 충분하지 않아요."}
+                </h3>
                 <p>
-                  각 역할을 두 번 이상 경험하고, 선택 비율에 차이가 생기면
-                  <br />
-                  라이벌이 과거 기록을 근거로 의심하기 시작합니다. 보통
-                  5판째부터.
+                  시민과 마피아를 각각 두 번 이상 경험해 보세요. 두 역할에서
+                  선택이 달라지면 보통 5판째부터 라이벌이 그 기록을 꺼냅니다.
+                  같은 행동을 했다면 기록이 충분해도 습관을 억지로 만들지
+                  않아요.
                 </p>
                 <button
                   className="secondary-button"
                   onClick={() => setPage("play")}
                 >
-                  테이블로 가기 <ArrowRight size={15} />
+                  게임으로 돌아가기 <ArrowRight size={15} />
                 </button>
               </div>
             ) : (
@@ -1136,25 +737,44 @@ export default function App() {
                 <div className="history-header">
                   <span>판</span>
                   <span>역할</span>
-                  <span>첫 수</span>
-                  <span>응수</span>
+                  <span>첫 번째 토론</span>
+                  <span>두 번째 토론</span>
                   <span>결과</span>
                 </div>
-                {state.history
-                  .slice(-20)
+                {(notebookRound === null
+                  ? state.history.slice(-20)
+                  : state.history.filter(
+                      (r) =>
+                        r.round === notebookRound ||
+                        r.round > state.history.length - 20,
+                    )
+                )
+                  .slice()
                   .reverse()
                   .map((r) => (
-                    <div key={r.round}>
+                    <div
+                      key={r.round}
+                      id={`record-${r.round}`}
+                      tabIndex={-1}
+                      className={
+                        notebookRound === r.round ? "selected-record" : ""
+                      }
+                      aria-label={
+                        notebookRound === r.round
+                          ? `${r.round}판: 라이벌이 인용한 실제 선택 기록`
+                          : undefined
+                      }
+                    >
                       <b>#{r.round}</b>
                       <span className={r.humanRole}>
                         {roleName(r.humanRole)}
                       </span>
                       <span>
                         {r.features.firstAccuse
-                          ? "선제 지목"
+                          ? "의심 공개"
                           : r.features.selfDefend
                             ? "결백 주장"
-                            : "관망"}
+                            : "지켜보기"}
                       </span>
                       <span>
                         {r.features.followMajority
@@ -1177,8 +797,8 @@ export default function App() {
         )}
         {page === "usage" && (
           <div className="content-page">
-            <div className="eyebrow">EVERY MOVE COUNTS</div>
-            <h1>작은 판, 쌓이는 변화.</h1>
+            <div className="eyebrow">플레이 기록과 사용량</div>
+            <h1>몇 판을 했고, 얼마나 썼을까요?</h1>
             <p className="page-intro">
               실측 값만 표시합니다. 연습 기록과 ChatGPT 호출은 구분됩니다.
             </p>
@@ -1218,7 +838,7 @@ export default function App() {
             <div className="usage-card">
               <div>
                 <Zap size={23} />
-                <h3>ChatGPT plan usage</h3>
+                <h3>ChatGPT 플랜 사용량</h3>
                 <p>
                   {mode === "practice"
                     ? "연습 모드는 OpenAI에 요청을 보내지 않습니다."
@@ -1243,7 +863,7 @@ export default function App() {
             <div className="latency-card">
               <div className="section-label">
                 <span>
-                  <Clock3 size={17} /> 1회 응답 속도 실측
+                  <Clock3 size={17} /> 별도 응답 속도 측정
                 </span>
                 <small>현재 계정 · 선택한 모델</small>
               </div>
@@ -1269,7 +889,9 @@ export default function App() {
                     (state.benchmark.completed
                       ? "실제 Responses API 완료 응답"
                       : "완료되지 않은 요청")
-                  : "ChatGPT로 연결한 뒤 측정할 수 있습니다. 측정 1회도 본인의 플랜 사용량에 포함됩니다."}
+                  : state.auth.sharing
+                    ? "아직 별도 속도 측정을 하지 않았어요. 측정 1회도 본인의 플랜 사용량에 포함됩니다."
+                    : "ChatGPT로 로그인한 뒤 측정할 수 있어요. 측정 1회도 본인의 플랜 사용량에 포함됩니다."}
               </p>
               <button
                 className="secondary-button"
@@ -1284,6 +906,34 @@ export default function App() {
                 응답 속도 측정 <ArrowRight size={14} />
               </button>
             </div>
+            {latestRecord && latestRecord.metrics.length > 0 && (
+              <details className="call-history">
+                <summary>
+                  {latestRecord.round}번째 판의 AI 응답 시간과 토큰 보기
+                </summary>
+                {latestRecord.metrics.map((m, i) => (
+                  <div className="call-row" key={i}>
+                    <strong>
+                      {i === 0 ? "첫 번째 토론" : "두 번째 토론"} · {m.model}
+                    </strong>
+                    <span>
+                      첫 텍스트까지 <b>{ms(m.ttftMs)}</b>
+                    </span>
+                    <span>
+                      {m.completed ? "완료까지" : "요청이 멈추기까지"}{" "}
+                      <b>{ms(m.completionMs)}</b>
+                    </span>
+                    <span>
+                      입력 {m.inputTokens ?? "미집계"} · 출력{" "}
+                      {m.outputTokens ?? "미집계"}
+                    </span>
+                    <span>
+                      총 토큰 <b>{m.totalTokens ?? "미집계"}</b>
+                    </span>
+                  </div>
+                ))}
+              </details>
+            )}
             <p className="footnote">
               한 판은 최대 2회 호출. 8,000 집계 토큰 이후 추가 호출을 멈춥니다.
               API 출력 토큰의 절대 상한은 지원되지 않아, 25초 시간 제한과 출력
@@ -1294,8 +944,12 @@ export default function App() {
         )}
         {page === "settings" && (
           <div className="content-page">
-            <div className="eyebrow">YOUR TABLE, YOUR RULES</div>
-            <h1>다음 판을 준비하세요.</h1>
+            <div className="eyebrow">게임 설정</div>
+            <h1>계정과 기억을 관리하세요.</h1>
+            <p className="page-intro">
+              ChatGPT 로그인, AI 모델 선택, 기억 사용 여부를 여기서 바꿀 수
+              있어요.
+            </p>
             <div className="settings-card">
               <div className="settings-row">
                 <div>
@@ -1321,8 +975,11 @@ export default function App() {
               </div>
               <div className="settings-row">
                 <div>
-                  <h3>라이벌의 텔 기억</h3>
-                  <p>다음 판부터 적용. 꺼도 내 선택은 기록됩니다.</p>
+                  <h3>라이벌이 과거 습관을 기억하게 하기</h3>
+                  <p>
+                    끄면 다음 판에서 과거 습관을 판단에 쓰지 않아요. 선택 기록은
+                    계속 쌓입니다.
+                  </p>
                 </div>
                 <button
                   className={"toggle " + (memory ? "on" : "")}
@@ -1499,6 +1156,7 @@ export default function App() {
         <div className="modal-backdrop">
           <div
             className="modal"
+            ref={dialogRef}
             role="dialog"
             aria-modal="true"
             aria-labelledby="modal-title"
@@ -1522,6 +1180,7 @@ export default function App() {
                 </a>
                 <button
                   className="secondary-button full"
+                  data-autofocus
                   onClick={() => action("ack-error")}
                 >
                   확인하고 로컬 대사로 이어가기
@@ -1585,6 +1244,7 @@ export default function App() {
                 <button
                   className="secondary-button full"
                   onClick={() => setModal(null)}
+                  data-autofocus
                 >
                   취소
                 </button>
@@ -1598,36 +1258,42 @@ export default function App() {
                 >
                   <X size={18} />
                 </button>
-                <div className="eyebrow">HOW TO PLAY</div>
-                <h2 id="modal-title">읽히고, 다시 속이세요.</h2>
+                <div className="eyebrow">처음 하는 사람을 위한 안내</div>
+                <h2 id="modal-title">게임은 어떻게 하나요?</h2>
                 <ol className="rules-list">
                   <li>
-                    <b>당신과 네 라이벌 중 한 명이 마피아.</b>
+                    <b>나와 라이벌 네 명, 마피아는 딱 한 명.</b>
                     <p>
-                      시민은 마피아를 찾고, 마피아는 살아남습니다. 알리바이는
-                      확실한 증거가 아닙니다.
+                      내 역할이 시민이면 마피아를 찾으세요. 마피아라면 다른
+                      사람에게 표를 돌리세요. 인물 카드의 알리바이는 불완전한
+                      단서예요. 그것만으로 정답을 알 수는 없습니다.
                     </p>
                   </li>
                   <li>
-                    <b>두 번 선택하고, 한 번 투표.</b>
+                    <b>사람과 행동을 고르며 두 번 토론해요.</b>
                     <p>
-                      지목·관망·결백 주장 후, 유지·변경·다수 추종을 선택하세요.
-                      단독 최다표 한 명이 추방됩니다. 동률이면 마피아 승리.
+                      첫 토론에서 마음속으로 의심하는 한 명을 고른 뒤, 의심
+                      공개·지켜보기·내 결백 주장 중 하나를 선택하세요. 라이벌의
+                      반응을 읽고 두 번째 토론에서 대상을 유지하거나 바꿉니다.
+                      글을 입력할 필요는 없어요.
                     </p>
                   </li>
                   <li>
-                    <b>각 역할 두 판부터 습관이 단서로.</b>
+                    <b>마지막에는 추방할 사람에게 한 표.</b>
                     <p>
-                      역할은 두 판씩 균형 배정됩니다. 반복해서 다르게 행동하면
-                      대개 5판째부터 텔이 등장합니다. 기록에 차이가 없으면
-                      억지로 만들지 않습니다.
+                      다섯 명의 표를 합쳐 혼자 가장 많은 표를 받은 한 명이
+                      추방됩니다. 그 사람이 마피아면 시민 승리. 시민이
+                      추방되거나 최다표가 동률이면 마피아 승리예요.
                     </p>
                   </li>
                   <li>
-                    <b>읽힌 습관을 역이용.</b>
+                    <b>여러 판을 하면, 습관이 읽히기 시작해요.</b>
                     <p>
-                      발견된 텔로 반대 역할의 인상을 심으세요. 기억 때문에 실제
-                      시민 라이벌의 투표가 틀린 방향으로 바뀌면 +75점.
+                      시민과 마피아를 각각 두 판 이상 경험한 뒤, 역할에 따라
+                      달라진 선택만 ‘텔’이라는 습관으로 기억해요. 예를 들어
+                      마피아일 때만 먼저 의심을 공개했다면, 다음 판에 그
+                      기록으로 지목당할 수 있습니다. 행동을 바꿔 그 추측을 속여
+                      보세요.
                     </p>
                   </li>
                 </ol>
@@ -1635,7 +1301,7 @@ export default function App() {
                   className="primary-button full"
                   onClick={() => setModal(null)}
                 >
-                  좋아, 다음 수를 두자 <ArrowRight size={16} />
+                  알겠어요 · 게임으로 돌아가기 <ArrowRight size={16} />
                 </button>
               </>
             )}

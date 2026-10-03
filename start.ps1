@@ -27,7 +27,8 @@ if ($Background) {
         if ($_.Exception.Message -like 'Another application*') { throw }
     }
     $tellNode = (Get-Command node).Source
-    $tellProcess = Start-Process -FilePath $tellNode -ArgumentList @('--import', 'tsx', 'server/index.ts', '--production') -WorkingDirectory $PSScriptRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $tellData 'runtime.stdout.log') -RedirectStandardError (Join-Path $tellData 'runtime.stderr.log')
+    $tellEntry = '"' + (Join-Path $PSScriptRoot 'server/index.ts') + '"'
+    $tellProcess = Start-Process -FilePath $tellNode -ArgumentList @('--import', 'tsx', $tellEntry, '--production') -WorkingDirectory $PSScriptRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $tellData 'runtime.stdout.log') -RedirectStandardError (Join-Path $tellData 'runtime.stderr.log')
     for ($tellAttempt = 0; $tellAttempt -lt 40; $tellAttempt++) {
         if ($tellProcess.HasExited) { throw "TELL failed to start. See $tellData\runtime.stderr.log" }
         try {

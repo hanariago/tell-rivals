@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.env*
+!.env.example
+.local/
+*.credential
+*.credential.tmp
+*.log
+artifacts/*.png
+artifacts/*.jpg
+artifacts/browser-*.json
